@@ -1,0 +1,3 @@
+*.pyc
+driving_dataset/*
+logs/*
