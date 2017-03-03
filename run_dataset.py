@@ -25,9 +25,19 @@ log = logger.ResultLogger('logs/runlog.csv')
 log.write(i, t, float('nan'), degrees, smoothed_angle)
 
 while(True): #cv2.waitKey(10) != ord('q')):
+
     i += 1
+
+    # Read 256 x 455 RGB image
     full_image = scipy.misc.imread("driving_dataset/" + str(i) + ".jpg", mode="RGB")
-    image = scipy.misc.imresize(full_image[-150:], [66, 200]) / 255.0
+
+    # Crop to last 150 rows
+    cropped_image = full_image[-150:]
+
+    # Resize to 66 x 200 and scale to interval [0,1]
+    image = scipy.misc.imresize(image, [66, 200]) / 255.0
+
+    # Perform inference
     degrees = model.y.eval(feed_dict={model.x: [image], model.keep_prob: 1.0})[0][0] * 180.0 / scipy.pi
 
     #make smooth angle transitions by turning the steering wheel based on the difference of the current angle
