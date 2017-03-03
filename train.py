@@ -9,7 +9,7 @@ import steering_model as sm
 
 # File and folder paths
 MODELDIR = './save'
-LOGDIR = './logs'
+LOGDIR = './logs/training'
 
 # Learning parameters
 L2NormConst = 0.001
@@ -37,14 +37,14 @@ tf.train.write_graph(sess.graph_def, MODELDIR, 'graph.pb')
 #
 
 # Mean square error loss
-mse = tf.reduce_mean(tf.square(tf.subtract(model.y_, model.y)))
+mse_loss = tf.reduce_mean(tf.square(tf.subtract(model.y_, model.y)))
 
 # L2 regularization loss
 train_vars = tf.trainable_variables()
 l2_loss = tf.add_n([tf.nn.l2_loss(v) for v in train_vars]) * L2NormConst
 
 # Total training loss
-loss =  mse + l2_loss
+loss =  mse_loss + l2_loss
 
 #
 # Prepare training
@@ -60,7 +60,10 @@ train_step = optimizer.minimize(loss)
 sess.run(tf.global_variables_initializer())
 
 # Create a summary to monitor cost tensor
-tf.summary.scalar("loss", loss)
+tf.summary.scalar("total loss", loss)
+tf.summary.scalar("L2 loss", l2_loss)
+tf.summary.scalar("MSE loss", mse_loss)
+
 
 # Merge all summaries into a single op
 merged_summary_op = tf.summary.merge_all()
@@ -68,13 +71,26 @@ merged_summary_op = tf.summary.merge_all()
 # Create checkpoint saver
 saver = tf.train.Saver()
 
-# op to write logs to Tensorboard
+# Op to write logs to Tensorboard
 summary_writer = tf.summary.FileWriter(LOGDIR, graph=tf.get_default_graph())
 
+# Create log folders
+if not os.path.exists(MODELDIR):
+    os.makedirs(MODELDIR)
+
+if not os.path.exists(LOGDIR):
+    os.makedirs(LOGDIR)
 
 #
 # Training
 #
+
+# Display instructions for TensorBoard
+print("\nTraining...")
+print("To track the training open TensorBoard:\n\n" \
+          "tensorboard --logdir " + LOGDIR + "\n\n")
+
+step = 0
 
 # Train over the dataset
 for epoch in range(epochs):
@@ -90,25 +106,25 @@ for epoch in range(epochs):
         if i % 10 == 0:
             xs, ys = driving_data.LoadValBatch(batch_size)
             loss_value = loss.eval(feed_dict={model.x:xs, model.y_: ys, model.keep_prob: 1.0})
-            print("Epoch: %d, Step: %d, Loss: %g" % (epoch, epoch * batch_size + i, loss_value))
+            print("Epoch: %d, Step: %d, Loss: %g" % (epoch, step, loss_value))
 
-        # Write logs at every iteration
-        summary = merged_summary_op.eval(feed_dict={model.x:xs, model.y_: ys, model.keep_prob: 1.0})
-        summary_writer.add_summary(summary, epoch * batch_size + i)
+            # Write logs at every iteration
+            summary = merged_summary_op.eval(feed_dict={model.x:xs, model.y_: ys, model.keep_prob: 1.0})
+            summary_writer.add_summary(summary, global_step=step)
 
-        # Save checkpoint
-        if i % batch_size == 0:
-            if not os.path.exists(MODELDIR):
-                os.makedirs(MODELDIR)
+        # Save checkpoint after last item of each batch
+        if i % batch_size == batch_size-1:
             checkpoint_path = os.path.join(MODELDIR, "model.ckpt")
-            filename = saver.save(sess, checkpoint_path)
+            filename = saver.save(sess, checkpoint_path, global_step=step)
 
             frozen_graph_def = tf.graph_util.convert_variables_to_constants(sess, sess.graph_def, ['y'])
             tf.train.write_graph(frozen_graph_def, MODELDIR, 'frozen_graph.pb')
 
+        step += 1
+
     print("Model saved in file: %s" % filename)
 
 # Display instructions for TensorBoard
-print("Run the command line:\n" \
-          "--> tensorboard --MODELDIR=./logs " \
-          "\nThen open http://0.0.0.0:6006/ into your web browser")
+print("\nTraining completed.\n")
+print("To view the training performance open TensorBoard:\n\n" \
+          "tensorboard --logdir " + LOGDIR + "\n\n")
