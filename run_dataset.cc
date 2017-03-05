@@ -1,7 +1,9 @@
 #include <fstream>
+#include <sstream>
 #include <vector>
 
-//#include "tensorflow/cc/client/client_session.h"
+
+
 #include "tensorflow/cc/ops/const_op.h"
 #include "tensorflow/cc/ops/image_ops.h"
 #include "tensorflow/cc/ops/standard_ops.h"
@@ -29,6 +31,9 @@ using tensorflow::int32;
 using tensorflow::string;
 using tensorflow::DT_FLOAT;
 using tensorflow::DT_STRING;
+
+
+
 
 // Reads a frozen graph protocol buffer from disk.
 Status LoadGraph(string graph_file_name, tensorflow::GraphDef* graph_def) {
@@ -234,61 +239,63 @@ int main(int argc, char* argv[]) {
 
   //const Tensor& resized_tensor = resized_tensors[0];
 */
-  Tensor image_file(DT_STRING, tensorflow::TensorShape());
-  image_file.scalar<string>()() = "driving_dataset/0.jpg";
-
-  // Prepare inputs to be fed for the run
-  std::vector<std::pair<string, tensorflow::Tensor>> load_inputs = {
-    {image_file_label, image_file}
-  };
-
-
-  // Load image file
-  std::vector<Tensor> image_outputs;
-  Status load_status = reader_session->Run(load_inputs, {loaded_image_label},
-                                           {}, &image_outputs);
-  if (!load_status.ok()) {
-    LOG(ERROR) << "Loading image file failed: " << load_status;
-    return -1;
-  }
-  const Tensor& image_tensor = image_outputs[0];
 
   // Set dropout keep propability to 1.0 to turn off drouput during inference
   Tensor keep_prob(DT_FLOAT, tensorflow::TensorShape());
   keep_prob.scalar<float>()() = 1.0;
 
-  // Prepare inputs to be fed for the run
-  std::vector<std::pair<string, tensorflow::Tensor>> inference_inputs = {
-    {input_layer_label, image_tensor},
-    {keep_prob_label, keep_prob}
-  };
 
-  // Perform inference
-  std::vector<Tensor> inference_outputs;
-  Status inference_status = inference_session->Run(
-                                        inference_inputs, {output_layer_label},
-                                        {}, &inference_outputs);
-  if (!inference_status.ok()) {
-    LOG(ERROR) << "Inference failed: " << inference_status;
-    return -1;
+  unsigned long image_index = 0;
+  while(true){
+
+    std::stringstream ss;
+    ss << image_index << ".jpg";
+    string image_file_name = ss.str();
+    LOG(INFO) << "Image file: " << image_file_name;
+    string image_file_path = tensorflow::io::JoinPath(root_dir, data_dir,
+                                                 image_file_name);
+
+    Tensor image_file(DT_STRING, tensorflow::TensorShape());
+    image_file.scalar<string>()() = image_file_path;
+
+
+    // Prepare inputs to be fed for the run
+    std::vector<std::pair<string, tensorflow::Tensor>> load_inputs = {
+      {image_file_label, image_file}
+    };
+
+
+    // Load image file
+    std::vector<Tensor> image_outputs;
+    Status load_status = reader_session->Run(load_inputs, {loaded_image_label},
+                                             {}, &image_outputs);
+    if (!load_status.ok()) {
+      LOG(ERROR) << "Loading image file failed: " << load_status;
+      return -1;
+    }
+    const Tensor& image_tensor = image_outputs[0];
+
+    // Prepare inputs to be fed for the run
+    std::vector<std::pair<string, tensorflow::Tensor>> inference_inputs = {
+      {input_layer_label, image_tensor},
+      {keep_prob_label, keep_prob}
+    };
+
+    // Perform inference
+    std::vector<Tensor> inference_outputs;
+    Status inference_status = inference_session->Run(
+                                          inference_inputs, {output_layer_label},
+                                          {}, &inference_outputs);
+    if (!inference_status.ok()) {
+      LOG(ERROR) << "Inference failed: " << inference_status;
+      return -1;
+    }
+
+    LOG(INFO) << "Angle: " << inference_outputs[0].scalar<float>();
+
+
+    image_index++;
   }
 
-  LOG(INFO) << inference_outputs[0].scalar<float>();
-
-
-/*
-  // Actually run the image through the model.
-  std::vector<Tensor> outputs;
-
-  Status run_status = session->Run(inputs,
-                                   {output_layer_label}, {}, &outputs);
-  if (!run_status.ok()) {
-    LOG(ERROR) << "Running model failed: " << run_status;
-    return -1;
-  }
-
-  LOG(INFO) << outputs[0].scalar<float>();
-
-*/
   return 0;
 }
