@@ -118,7 +118,7 @@ for epoch in range(epochs):
             filename = saver.save(sess, checkpoint_path, global_step=step)
 
             frozen_graph_def = tf.graph_util.convert_variables_to_constants(sess, sess.graph_def, ['y'])
-            tf.train.write_graph(frozen_graph_def, MODELDIR, 'frozen_graph.pb')
+            tf.train.write_graph(frozen_graph_def, MODELDIR, 'frozen_graph.pb', as_text=False)
 
         step += 1
 

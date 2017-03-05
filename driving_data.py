@@ -1,6 +1,8 @@
 import scipy.misc
 import random
 
+DATASETDIR = './driving_dataset/scaled'
+
 xs = []
 ys = []
 
@@ -9,9 +11,9 @@ train_batch_pointer = 0
 val_batch_pointer = 0
 
 #read data.txt
-with open("driving_dataset/data.txt") as f:
+with open(DATASETDIR + "/data.txt") as f:
     for line in f:
-        xs.append("driving_dataset/" + line.split()[0])
+        xs.append(DATASETDIR + "/" + line.split()[0])
         #the paper by Nvidia uses the inverse of the turning radius,
         #but steering wheel angle is proportional to the inverse of turning radius
         #so the steering wheel angle in radians is used as the output
@@ -39,7 +41,7 @@ def LoadTrainBatch(batch_size):
     x_out = []
     y_out = []
     for i in range(0, batch_size):
-        x_out.append(scipy.misc.imresize(scipy.misc.imread(train_xs[(train_batch_pointer + i) % num_train_images])[-150:], [66, 200]) / 255.0)
+        x_out.append(scipy.misc.imread(train_xs[(train_batch_pointer + i) % num_train_images]) / 255.0)
         y_out.append([train_ys[(train_batch_pointer + i) % num_train_images]])
     train_batch_pointer += batch_size
     return x_out, y_out
@@ -49,7 +51,7 @@ def LoadValBatch(batch_size):
     x_out = []
     y_out = []
     for i in range(0, batch_size):
-        x_out.append(scipy.misc.imresize(scipy.misc.imread(val_xs[(val_batch_pointer + i) % num_val_images])[-150:], [66, 200]) / 255.0)
+        x_out.append(scipy.misc.imread(val_xs[(val_batch_pointer + i) % num_val_images]) / 255.0)
         y_out.append([val_ys[(val_batch_pointer + i) % num_val_images]])
     val_batch_pointer += batch_size
     return x_out, y_out

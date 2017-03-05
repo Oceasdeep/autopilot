@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 # Import run log from CSV file
-df = pd.DataFrame.from_csv('logs/runlog.csv')
+df = pd.DataFrame.from_csv('results/run.py.csv')
 
 # Remove two first rows to remove initialization effects
 df = df.loc[df.index > 0]
