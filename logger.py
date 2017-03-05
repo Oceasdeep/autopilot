@@ -12,10 +12,10 @@ class ResultLogger(object):
         self.log = open(path, 'w')
 
         # Write initial log entry
-        self.log.write('Index,Time,Time_Diff,Angle,Smoothed_Angle\n')
+        self.log.write('Index,Time,Time_Diff,Output\n')
 
 
-    def write(self, i, t, delta_t, degrees, smoothed_angle):
+    def write(self, i, t, delta_t, output):
         """Writes a single entry to the log file
 
         Args:
@@ -23,12 +23,11 @@ class ResultLogger(object):
             t (float): Timestamp in seconds
             delta_t (float): Time difference in seconds between this and
                 previous timestamps
-            degrees (float): Steering angle in degrees
-            smoothed_angle (float): Smoothed steering angle
+            output (float): Output of the Inference
 
         """
 
-        self.log.write('%d,%f,%f,%f,%f\n' % (i, t, delta_t, degrees, smoothed_angle))
+        self.log.write('%d,%f,%f,%f\n' % (i, t, delta_t, output))
 
     def __del__(self):
         self.log.close()

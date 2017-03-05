@@ -44,7 +44,7 @@ y = graph.get_tensor_by_name("import/y:0")
 
 # Initialize variables
 smoothed_angle = 0.0
-degrees = 0.0
+output = 0.0
 i = -1
 t = time.time()
 t_prev = t
@@ -55,7 +55,7 @@ t0 = t
 if not os.path.exists(RESULTSDIR):
     os.makedirs(RESULTSDIR)
 log = logger.ResultLogger(os.path.join(RESULTSDIR, RESULTFILE))
-log.write(i, t-t0, 0.0, degrees, smoothed_angle)
+log.write(i, t-t0, 0.0, output)
 
 while(True): #cv2.waitKey(10) != ord('q')):
 
@@ -67,19 +67,15 @@ while(True): #cv2.waitKey(10) != ord('q')):
     except:
         break
 
-    # Resize to 66 x 200 and scale to interval [0,1]
+    # Normalize image
     normalized_image = full_image / 255.0
 
     # Perform inference
-    degrees = sess.run(y, feed_dict={x: [normalized_image], keep_prob: 1.0})[0][0] * 180.0 / scipy.pi
-
-    # make smooth angle transitions by turning the steering wheel based on the difference of the current angle
-    # and the predicted angle
-    smoothed_angle += 0.2 * pow(abs((degrees - smoothed_angle)), 2.0 / 3.0) * (degrees - smoothed_angle) / abs(degrees - smoothed_angle)
+    output = sess.run(y, feed_dict={x: [normalized_image], keep_prob: 1.0})[0][0]
 
     # Measure current time
     t = time.time()
 
     # Write to driving log
-    log.write(i, t-t0, t-t_prev, degrees, smoothed_angle)
+    log.write(i, t-t0, t-t_prev, output)
     t_prev = t

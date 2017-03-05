@@ -1,8 +1,11 @@
+#define _USE_MATH_DEFINES
+
+#include <ostream>
 #include <fstream>
 #include <sstream>
 #include <vector>
-
-
+#include <cmath>
+#include <time.h>
 
 #include "tensorflow/cc/ops/const_op.h"
 #include "tensorflow/cc/ops/image_ops.h"
@@ -32,13 +35,23 @@ using tensorflow::string;
 using tensorflow::DT_FLOAT;
 using tensorflow::DT_STRING;
 
-
-
+double timediff(timespec end, timespec start)
+{
+	timespec temp;
+	if ((end.tv_nsec-start.tv_nsec)<0) {
+		temp.tv_sec = end.tv_sec-start.tv_sec-1;
+		temp.tv_nsec = 1000000000+end.tv_nsec-start.tv_nsec;
+	} else {
+		temp.tv_sec = end.tv_sec-start.tv_sec;
+		temp.tv_nsec = end.tv_nsec-start.tv_nsec;
+	}
+  double seconds = static_cast<double>(temp.tv_sec)
+                   + static_cast<double>(temp.tv_nsec)/1e9;
+	return seconds;
+}
 
 // Reads a frozen graph protocol buffer from disk.
 Status LoadGraph(string graph_file_name, tensorflow::GraphDef* graph_def) {
-//                 std::unique_ptr<tensorflow::Session>* session) {
-//  tensorflow::GraphDef graph_def;
 
   // Try reading initially in binary form and if that fails then in text form.
   Status read_binary_proto_status =
@@ -68,12 +81,7 @@ Status LoadGraph(string graph_file_name, tensorflow::GraphDef* graph_def) {
 
 // Given an image folder, read in the data, try to decode it as an image,
 // resize it to the requested size, and then scale the values as desired.
-Status ImageReader(const int input_height,
-                   const int input_width,
-                   const int cropped_height,
-                   const int height,
-                   const int width,
-                   string input_name,
+Status ImageReader(string input_name,
                    string output_name,
                    tensorflow::GraphDef* graph_def) {
 
@@ -96,41 +104,21 @@ Status ImageReader(const int input_height,
       DecodeJpeg(root.WithOpName("jpeg_reader"), file_reader,
                  DecodeJpeg::Channels(wanted_channels));
 
-
-  // The convention for image ops in TensorFlow is that all images are expected
-  // to be in batches, so that they're four-dimensional arrays with indices of
-  // [batch, height, width, channel]. Because we only have a single image, we
-  // have to add a batch dimension of 1 to the start with ExpandDims().
+  // Add batch dimension
   auto dims_expander = ExpandDims(root, image_reader, 0);
-
-  // Crop image to wanted dimensions
-  auto cropped = Slice(root.WithOpName("crop"), dims_expander,
-                       {0, input_height-cropped_height, 0, 0},
-                       {1, cropped_height, input_width, wanted_channels});
-
-  // Bilinearly resize the image to fit the required dimensions.
-  auto resized = ResizeBilinear(
-      root, cropped,
-      Const(root.WithOpName("size"), {height, width}));
 
   // Now cast the image data to float so we can do normal math on it.
   auto float_caster =
-      Cast(root.WithOpName("float_caster"), resized,
+      Cast(root.WithOpName("float_caster"), dims_expander,
            tensorflow::DT_FLOAT);
 
-  // Subtract the mean and divide by the scale.
+  // Scale image intensities to be between [0,1]
   Div(root.WithOpName(output_name), float_caster, {255.0f});
 
   // This runs the GraphDef network definition that we've just constructed, and
   // returns the results in the output tensor.
   TF_RETURN_IF_ERROR(root.ToGraphDef(graph_def));
   return Status::OK();
-/*
-  std::unique_ptr<tensorflow::Session> session(
-      tensorflow::NewSession(tensorflow::SessionOptions()));
-  TF_RETURN_IF_ERROR(session->Create(graph));
-  TF_RETURN_IF_ERROR(session->Run({}, {output_name}, {}, out_tensors));
-  */
 }
 
 int main(int argc, char* argv[]) {
@@ -138,11 +126,11 @@ int main(int argc, char* argv[]) {
   using namespace tensorflow::ops;
 
   // Initialize paths
-  string log_dir = "logs";
+  string log_dir = "results";
   string graph_dir = "save";
   string graph_file = "frozen_graph.pb";
-  string log_file = "runlog.cc.csv";
-  string data_dir = "driving_dataset";
+  string log_file = "run.cc.csv";
+  string data_dir = tensorflow::io::JoinPath("driving_dataset","scaled");
   string root_dir = "";
 
   // Placeholder names
@@ -152,13 +140,6 @@ int main(int argc, char* argv[]) {
   string image_file_label = "file_path";
   string loaded_image_label = "normalized";
 
-  // Image properties
-  int32 input_width = 455;
-  int32 input_height = 256;
-  int32 cropped_height = 150;
-  int32 width = 200;
-  int32 height = 66;
-
   // Input and output layer names
   string input_name = "x";
   string output_name = "y";
@@ -166,12 +147,9 @@ int main(int argc, char* argv[]) {
 
   // Get the image from disk as a float array of numbers, resized and normalized
   // to the specifications the main graph expects.
-  //std::vector<Tensor> resized_tensors;
   tensorflow::GraphDef reader_def;
   Status img_reader_status =
-      ImageReader(input_height, input_width,
-                  cropped_height, height, width,
-                  image_file_label, loaded_image_label,
+      ImageReader(image_file_label, loaded_image_label,
                   &reader_def);
   if (!img_reader_status.ok()) {
     LOG(ERROR) << img_reader_status;
@@ -186,7 +164,6 @@ int main(int argc, char* argv[]) {
     LOG(ERROR) << reader_session_status;
     return -1;
   }
-
 
   // Load the frozen graph from file
   string graph_path = tensorflow::io::JoinPath(root_dir, graph_dir, graph_file);
@@ -206,72 +183,63 @@ int main(int argc, char* argv[]) {
     return -1;
   }
 
-
-/*
-  GraphConstructorOptions opts;
-
-  // Create root scope
-  auto root = tensorflow::Scope::NewRootScope();
-
-  // Create inference subscope
-  auto inference_scope = root.NewSubScope("inference");
-
-  // Add inference graphdef to the subscope
-  Status inference_conversion_status = ConvertGraphDefToGraph(
-      opts, inference_def, inference_scope.graph());
-  if (!inference_conversion_status.ok()) {
-    LOG(ERROR) << inference_conversion_status;
-    return -1;
-  }
-
-  // Create reader subscope
-  auto reader_scope = root.NewSubScope("reader");
-
-  // Add reader graphdef to the subscope
-  Status reader_conversion_status = ConvertGraphDefToGraph(
-      opts, reader_def, reader_scope.graph());
-  if (!reader_conversion_status.ok()) {
-    LOG(ERROR) << reader_conversion_status;
-    return -1;
-  }
-
-  ClientSession session(root);
-
-  //const Tensor& resized_tensor = resized_tensors[0];
-*/
-
   // Set dropout keep propability to 1.0 to turn off drouput during inference
   Tensor keep_prob(DT_FLOAT, tensorflow::TensorShape());
   keep_prob.scalar<float>()() = 1.0;
 
+  string runlog_path = tensorflow::io::JoinPath(root_dir, log_dir,
+                                                log_file);
 
-  unsigned long image_index = 0;
+
+  // Open runlog file and add header string
+  std::ofstream runlog;
+  runlog.open(runlog_path);
+  runlog << "Index,Time,Time_Diff,Output" << std::endl;
+
+
+  // Initialize timers
+  timespec t;
+  clock_gettime(CLOCK_MONOTONIC, &t);
+
+  timespec t0;
+  t0 = t;
+
+  timespec t_prev;
+  t_prev = t;
+
+  // Initialize image index
+  long image_index = -1;
+
+  float output = 0.0;
+  float smoothed_angle = 0.0;
+
+  // Write initial entry to runlog
+  runlog << image_index << "," << timediff(t,t0) << "," << timediff(t,t_prev)
+        << "," << output << std::endl;
+
   while(true){
+    image_index++;
 
     std::stringstream ss;
     ss << image_index << ".jpg";
     string image_file_name = ss.str();
-    LOG(INFO) << "Image file: " << image_file_name;
     string image_file_path = tensorflow::io::JoinPath(root_dir, data_dir,
                                                  image_file_name);
 
     Tensor image_file(DT_STRING, tensorflow::TensorShape());
     image_file.scalar<string>()() = image_file_path;
 
-
     // Prepare inputs to be fed for the run
     std::vector<std::pair<string, tensorflow::Tensor>> load_inputs = {
       {image_file_label, image_file}
     };
-
 
     // Load image file
     std::vector<Tensor> image_outputs;
     Status load_status = reader_session->Run(load_inputs, {loaded_image_label},
                                              {}, &image_outputs);
     if (!load_status.ok()) {
-      LOG(ERROR) << "Loading image file failed: " << load_status;
-      return -1;
+      break;
     }
     const Tensor& image_tensor = image_outputs[0];
 
@@ -291,10 +259,15 @@ int main(int argc, char* argv[]) {
       return -1;
     }
 
-    LOG(INFO) << "Angle: " << inference_outputs[0].scalar<float>();
+    output = inference_outputs[0].scalar<float>()(0);
+
+    clock_gettime(CLOCK_MONOTONIC, &t);
+
+    runlog << image_index << "," << timediff(t,t0) << "," << timediff(t,t_prev)
+          << "," << output << std::endl;
+    t_prev = t;
 
 
-    image_index++;
   }
 
   return 0;
