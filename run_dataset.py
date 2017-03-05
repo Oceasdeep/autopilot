@@ -6,9 +6,13 @@ from subprocess import call
 import time
 import logger
 
+MODELDIR = './save'
+LOGDIR = './logs'
+RESULTSDIR = './results'
+
 sess = tf.InteractiveSession()
 saver = tf.train.Saver()
-saver.restore(sess, "save/model.ckpt")
+saver.restore(sess, os.path.join(MODELDIR,'model.ckpt'))
 
 img = cv2.imread('steering_wheel_image.jpg',0)
 rows,cols = img.shape
@@ -20,8 +24,12 @@ i = -1
 t = time.time()
 t_prev = t
 
+
+
 # Create ResultLogger and write initial log entry
-log = logger.ResultLogger('logs/runlog.csv')
+if not os.path.exists(RESULTSDIR):
+    os.makedirs(RESULTSDIR)
+log = logger.ResultLogger(os.path.join(RESULTSDIR, 'run.py.csv')
 log.write(i, t, float('nan'), degrees, smoothed_angle)
 
 while(True): #cv2.waitKey(10) != ord('q')):

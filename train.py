@@ -9,7 +9,7 @@ import steering_model as sm
 
 # File and folder paths
 MODELDIR = './save'
-LOGDIR = './logs/training'
+LOGDIR = './logs'
 
 # Learning parameters
 L2NormConst = 0.001

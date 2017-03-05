@@ -17,6 +17,7 @@ cc_binary(
         "//tensorflow/cc:cc_ops",
         "//tensorflow/core:framework_internal",
         "//tensorflow/core:tensorflow",
+        "//tensorflow/cc:client_session",
     ],
 )
 
