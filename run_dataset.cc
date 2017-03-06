@@ -6,6 +6,8 @@
 #include <vector>
 #include <cmath>
 #include <time.h>
+#include <jpeglib.h>
+#include <setjmp.h>
 
 #include "tensorflow/cc/ops/const_op.h"
 #include "tensorflow/cc/ops/image_ops.h"
@@ -50,6 +52,134 @@ double timediff(timespec end, timespec start)
 	return seconds;
 }
 
+// Error handling for JPEG decoding.
+void CatchError(j_common_ptr cinfo) {
+  (*cinfo->err->output_message)(cinfo);
+  jmp_buf *jpeg_jmpbuf = reinterpret_cast<jmp_buf *>(cinfo->client_data);
+  jpeg_destroy(cinfo);
+  longjmp(*jpeg_jmpbuf, 1);
+}
+
+// Decompresses a JPEG file from disk.
+Status LoadJpegFile(string file_name, std::vector<tensorflow::uint8>* data,
+		    int* width, int* height, int* channels) {
+  struct jpeg_decompress_struct cinfo;
+  FILE * infile;
+  JSAMPARRAY buffer;
+  int row_stride;
+
+  if ((infile = fopen(file_name.c_str(), "rb")) == NULL) {
+    LOG(ERROR) << "Can't open " << file_name;
+    return tensorflow::errors::NotFound("JPEG file ", file_name,
+					" not found");
+  }
+
+  struct jpeg_error_mgr jerr;
+  jmp_buf jpeg_jmpbuf;  // recovery point in case of error
+  cinfo.err = jpeg_std_error(&jerr);
+  cinfo.client_data = &jpeg_jmpbuf;
+  jerr.error_exit = CatchError;
+  if (setjmp(jpeg_jmpbuf)) {
+    fclose(infile);
+    return tensorflow::errors::Unknown("JPEG decoding failed");
+  }
+
+  jpeg_create_decompress(&cinfo);
+  jpeg_stdio_src(&cinfo, infile);
+  jpeg_read_header(&cinfo, TRUE);
+  jpeg_start_decompress(&cinfo);
+  *width = cinfo.output_width;
+  *height = cinfo.output_height;
+  *channels = cinfo.output_components;
+  data->resize((*height) * (*width) * (*channels));
+
+  row_stride = cinfo.output_width * cinfo.output_components;
+  buffer = (*cinfo.mem->alloc_sarray)
+    ((j_common_ptr) &cinfo, JPOOL_IMAGE, row_stride, 1);
+  while (cinfo.output_scanline < cinfo.output_height) {
+    tensorflow::uint8* row_address = &((*data)[cinfo.output_scanline * row_stride]);
+    jpeg_read_scanlines(&cinfo, buffer, 1);
+    memcpy(row_address, buffer[0], row_stride);
+  }
+
+  jpeg_finish_decompress(&cinfo);
+  jpeg_destroy_decompress(&cinfo);
+  fclose(infile);
+  return Status::OK();
+}
+
+// Given an image file name, read in the data, try to decode it as an image,
+// resize it to the requested size, and then scale the values as desired.
+Status ReadTensorFromImageFile(string file_name, const int wanted_height,
+                               const int wanted_width, const float input_mean,
+                               const float input_std,
+                               std::vector<Tensor>* out_tensors) {
+  std::vector<tensorflow::uint8> image_data;
+  int image_width;
+  int image_height;
+  int image_channels;
+  TF_RETURN_IF_ERROR(LoadJpegFile(file_name, &image_data, &image_width,
+				  &image_height, &image_channels));
+  const int wanted_channels = 3;
+  if (image_channels < wanted_channels) {
+    return tensorflow::errors::FailedPrecondition("Image needs to have at least ",
+						  wanted_channels, " but only has ",
+						  image_channels);
+  }
+  // In these loops, we convert the eight-bit data in the image into float, resize
+  // it using bilinear filtering, and scale it numerically to the float range that
+  // the model expects (given by input_mean and input_std).
+  tensorflow::Tensor image_tensor(
+      tensorflow::DT_FLOAT, tensorflow::TensorShape(
+      {1, wanted_height, wanted_width, wanted_channels}));
+  auto image_tensor_mapped = image_tensor.tensor<float, 4>();
+  tensorflow::uint8* in = image_data.data();
+  float *out = image_tensor_mapped.data();
+  const size_t image_rowlen = image_width * image_channels;
+  const float width_scale = static_cast<float>(image_width) / wanted_width;
+  const float height_scale = static_cast<float>(image_height) / wanted_height;
+  for (int y = 0; y < wanted_height; ++y) {
+    const float in_y = y * height_scale;
+    const int top_y_index = static_cast<int>(floorf(in_y));
+    const int bottom_y_index =
+      std::min(static_cast<int>(ceilf(in_y)), (image_height - 1));
+    const float y_lerp = in_y - top_y_index;
+    tensorflow::uint8* in_top_row = in + (top_y_index * image_rowlen);
+    tensorflow::uint8* in_bottom_row = in + (bottom_y_index * image_rowlen);
+    float *out_row = out + (y * wanted_width * wanted_channels);
+    for (int x = 0; x < wanted_width; ++x) {
+      const float in_x = x * width_scale;
+      const int left_x_index = static_cast<int>(floorf(in_x));
+      const int right_x_index =
+	std::min(static_cast<int>(ceilf(in_x)), (image_width - 1));
+      tensorflow::uint8* in_top_left_pixel =
+	in_top_row + (left_x_index * wanted_channels);
+      tensorflow::uint8* in_top_right_pixel =
+	in_top_row + (right_x_index * wanted_channels);
+      tensorflow::uint8* in_bottom_left_pixel =
+	in_bottom_row + (left_x_index * wanted_channels);
+      tensorflow::uint8* in_bottom_right_pixel =
+	in_bottom_row + (right_x_index * wanted_channels);
+      const float x_lerp = in_x - left_x_index;
+      float *out_pixel = out_row + (x * wanted_channels);
+      for (int c = 0; c < wanted_channels; ++c) {
+	const float top_left((in_top_left_pixel[c] - input_mean) / input_std);
+	const float top_right((in_top_right_pixel[c] - input_mean) / input_std);
+	const float bottom_left((in_bottom_left_pixel[c] - input_mean) / input_std);
+	const float bottom_right((in_bottom_right_pixel[c] - input_mean) / input_std);
+	const float top = top_left + (top_right - top_left) * x_lerp;
+	const float bottom =
+	  bottom_left + (bottom_right - bottom_left) * x_lerp;
+	out_pixel[c] = top + (bottom - top) * y_lerp;
+      }
+    }
+  }
+
+  out_tensors->push_back(image_tensor);
+  return Status::OK();
+}
+
+
 // Reads a frozen graph protocol buffer from disk.
 Status LoadGraph(string graph_file_name, tensorflow::GraphDef* graph_def) {
 
@@ -78,7 +208,7 @@ Status LoadGraph(string graph_file_name, tensorflow::GraphDef* graph_def) {
   return Status::OK();
 }
 */
-
+/*
 // Given an image folder, read in the data, try to decode it as an image,
 // resize it to the requested size, and then scale the values as desired.
 Status ImageReader(string input_name,
@@ -101,7 +231,7 @@ Status ImageReader(string input_name,
   // Now decode the JPEG file
   const int wanted_channels = 3;
   auto image_reader =
-      DecodeJpeg(root.WithOpName("jpeg_reader"), file_reader,
+      DecodeJpeg(root.WithOpName("jpeg_decoder"), file_reader,
                  DecodeJpeg::Channels(wanted_channels));
 
   // Add batch dimension
@@ -120,6 +250,8 @@ Status ImageReader(string input_name,
   TF_RETURN_IF_ERROR(root.ToGraphDef(graph_def));
   return Status::OK();
 }
+
+*/
 
 int main(int argc, char* argv[]) {
   using namespace tensorflow;
@@ -144,9 +276,14 @@ int main(int argc, char* argv[]) {
   string input_name = "x";
   string output_name = "y";
 
+  const int input_height = 66;
+  const int input_width = 200;
+  const float input_mean = 0.0;
+  const float input_std = 255.0;
 
   // Get the image from disk as a float array of numbers, resized and normalized
   // to the specifications the main graph expects.
+  /*
   tensorflow::GraphDef reader_def;
   Status img_reader_status =
       ImageReader(image_file_label, loaded_image_label,
@@ -164,6 +301,7 @@ int main(int argc, char* argv[]) {
     LOG(ERROR) << reader_session_status;
     return -1;
   }
+  */
 
   // Load the frozen graph from file
   string graph_path = tensorflow::io::JoinPath(root_dir, graph_dir, graph_file);
@@ -220,28 +358,23 @@ int main(int argc, char* argv[]) {
   while(true){
     image_index++;
 
+
+    // Get the image from disk as a float array of numbers, resized and normalized
+    // to the specifications the main graph expects.
+    std::vector<Tensor> resized_tensors;
     std::stringstream ss;
     ss << image_index << ".jpg";
     string image_file_name = ss.str();
-    string image_file_path = tensorflow::io::JoinPath(root_dir, data_dir,
+    string image_path = tensorflow::io::JoinPath(root_dir, data_dir,
                                                  image_file_name);
-
-    Tensor image_file(DT_STRING, tensorflow::TensorShape());
-    image_file.scalar<string>()() = image_file_path;
-
-    // Prepare inputs to be fed for the run
-    std::vector<std::pair<string, tensorflow::Tensor>> load_inputs = {
-      {image_file_label, image_file}
-    };
-
-    // Load image file
-    std::vector<Tensor> image_outputs;
-    Status load_status = reader_session->Run(load_inputs, {loaded_image_label},
-                                             {}, &image_outputs);
-    if (!load_status.ok()) {
-      break;
+    Status read_tensor_status =
+       ReadTensorFromImageFile(image_path, input_height, input_width, input_mean,
+                               input_std, &resized_tensors);
+    if (!read_tensor_status.ok()) {
+      LOG(ERROR) << read_tensor_status;
+      return -1;
     }
-    const Tensor& image_tensor = image_outputs[0];
+    const Tensor& image_tensor = resized_tensors[0];
 
     // Prepare inputs to be fed for the run
     std::vector<std::pair<string, tensorflow::Tensor>> inference_inputs = {
