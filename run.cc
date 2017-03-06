@@ -37,6 +37,8 @@ using tensorflow::string;
 using tensorflow::DT_FLOAT;
 using tensorflow::DT_STRING;
 
+
+// Computes the time difference in seconds between two time events
 double timediff(timespec end, timespec start)
 {
 	timespec temp;
@@ -60,7 +62,7 @@ void CatchError(j_common_ptr cinfo) {
   longjmp(*jpeg_jmpbuf, 1);
 }
 
-// Decompresses a JPEG file from disk.
+// Decompresses a JPEG file from disk into a uin8 vector
 Status LoadJpegFile(string file_name, std::vector<tensorflow::uint8>* data,
 		    int* width, int* height, int* channels) {
   struct jpeg_decompress_struct cinfo;
@@ -174,15 +176,12 @@ Status ReadTensorFromImageFile(string file_name, const int wanted_height,
       }
     }
   }
-
   out_tensors->push_back(image_tensor);
   return Status::OK();
 }
 
-
 // Reads a frozen graph protocol buffer from disk.
 Status LoadGraph(string graph_file_name, tensorflow::GraphDef* graph_def) {
-
   // Try reading initially in binary form and if that fails then in text form.
   Status read_binary_proto_status =
       ReadBinaryProto(tensorflow::Env::Default(), graph_file_name, graph_def);
@@ -196,68 +195,13 @@ Status LoadGraph(string graph_file_name, tensorflow::GraphDef* graph_def) {
   }
   return Status::OK();
 }
-/*
-  // Create a new session
-  session->reset(tensorflow::NewSession(tensorflow::SessionOptions()));
 
-  // Create a new graph based on the graph_def loaded from disk
-  Status session_create_status = (*session)->Create(graph_def);
-  if (!session_create_status.ok()) {
-    return session_create_status;
-  }
-  return Status::OK();
-}
-*/
-/*
-// Given an image folder, read in the data, try to decode it as an image,
-// resize it to the requested size, and then scale the values as desired.
-Status ImageReader(string input_name,
-                   string output_name,
-                   tensorflow::GraphDef* graph_def) {
-
-  using namespace ::tensorflow::ops;  // NOLINT(build/namespaces)
-
-  // Create root scope
-  auto root = tensorflow::Scope::NewRootScope();
-
-  // File path Placeholder
-  auto file_path_placeholder = Placeholder(root.WithOpName(input_name),
-                                           DT_STRING);
-
-  // File reader
-  auto file_reader = tensorflow::ops::ReadFile(root.WithOpName("file_reader"),
-                                               file_path_placeholder);
-
-  // Now decode the JPEG file
-  const int wanted_channels = 3;
-  auto image_reader =
-      DecodeJpeg(root.WithOpName("jpeg_decoder"), file_reader,
-                 DecodeJpeg::Channels(wanted_channels));
-
-  // Add batch dimension
-  auto dims_expander = ExpandDims(root, image_reader, 0);
-
-  // Now cast the image data to float so we can do normal math on it.
-  auto float_caster =
-      Cast(root.WithOpName("float_caster"), dims_expander,
-           tensorflow::DT_FLOAT);
-
-  // Scale image intensities to be between [0,1]
-  Div(root.WithOpName(output_name), float_caster, {255.0f});
-
-  // This runs the GraphDef network definition that we've just constructed, and
-  // returns the results in the output tensor.
-  TF_RETURN_IF_ERROR(root.ToGraphDef(graph_def));
-  return Status::OK();
-}
-
-*/
-
+// Main function
 int main(int argc, char* argv[]) {
   using namespace tensorflow;
   using namespace tensorflow::ops;
 
-  // Initialize paths
+  // Initialize path variables
   string log_dir = "results";
   string graph_dir = "save";
   string graph_file = "frozen_graph.pb";
@@ -265,45 +209,20 @@ int main(int argc, char* argv[]) {
   string data_dir = tensorflow::io::JoinPath("driving_dataset","scaled");
   string root_dir = "";
 
-  // Placeholder names
+  // Tensorflow graph placeholder names
   string input_layer_label = "x";
   string keep_prob_label = "keep_prob";
   string output_layer_label = "y";
   string image_file_label = "file_path";
   string loaded_image_label = "normalized";
 
-  // Input and output layer names
-  string input_name = "x";
-  string output_name = "y";
-
+  // Image properties
   const int input_height = 66;
   const int input_width = 200;
   const float input_mean = 0.0;
   const float input_std = 255.0;
 
-  // Get the image from disk as a float array of numbers, resized and normalized
-  // to the specifications the main graph expects.
-  /*
-  tensorflow::GraphDef reader_def;
-  Status img_reader_status =
-      ImageReader(image_file_label, loaded_image_label,
-                  &reader_def);
-  if (!img_reader_status.ok()) {
-    LOG(ERROR) << img_reader_status;
-    return -1;
-  }
-
-  // Create image reader session
-  std::unique_ptr<tensorflow::Session> reader_session(
-      tensorflow::NewSession(tensorflow::SessionOptions()));
-  Status reader_session_status = reader_session->Create(reader_def);
-  if (!reader_session_status.ok()) {
-    LOG(ERROR) << reader_session_status;
-    return -1;
-  }
-  */
-
-  // Load the frozen graph from file
+  // Load the frozen graph we are going to use for inference from file
   string graph_path = tensorflow::io::JoinPath(root_dir, graph_dir, graph_file);
   tensorflow::GraphDef inference_def;
   Status load_graph_status = LoadGraph(graph_path, &inference_def);
@@ -325,42 +244,44 @@ int main(int argc, char* argv[]) {
   Tensor keep_prob(DT_FLOAT, tensorflow::TensorShape());
   keep_prob.scalar<float>()() = 1.0;
 
+  // Open runlog file and add a header line
   string runlog_path = tensorflow::io::JoinPath(root_dir, log_dir,
                                                 log_file);
-
-
-  // Open runlog file and add header string
   std::ofstream runlog;
   runlog.open(runlog_path);
   runlog << "Index,Time,Time_Diff,Output" << std::endl;
 
-
-  // Initialize timers
+  // Initialize timers used for timing the inference
+  // t is the current time
   timespec t;
   clock_gettime(CLOCK_MONOTONIC, &t);
 
+  // t0 is the start time of the inference
   timespec t0;
   t0 = t;
 
+  // t_prev is the time at previous iteration
   timespec t_prev;
   t_prev = t;
 
   // Initialize image index
   long image_index = -1;
 
+  // initialize output variable
   float output = 0.0;
-  float smoothed_angle = 0.0;
 
   // Write initial entry to runlog
   runlog << image_index << "," << timediff(t,t0) << "," << timediff(t,t_prev)
         << "," << output << std::endl;
 
+  // Inference loop
   while(true){
+
+    // Increment image index
     image_index++;
 
-
-    // Get the image from disk as a float array of numbers, resized and normalized
-    // to the specifications the main graph expects.
+    // Get the image from disk as a float array of numbers, resized and
+    // normalized to the specifications the graph input placeholder expects.
     std::vector<Tensor> resized_tensors;
     std::stringstream ss;
     ss << image_index << ".jpg";
@@ -374,15 +295,17 @@ int main(int argc, char* argv[]) {
       LOG(ERROR) << read_tensor_status;
       return -1;
     }
+
+    // Extract the image from the returned tensor vector
     const Tensor& image_tensor = resized_tensors[0];
 
-    // Prepare inputs to be fed for the run
+    // Prepare inputs to be fed for the inference step
     std::vector<std::pair<string, tensorflow::Tensor>> inference_inputs = {
       {input_layer_label, image_tensor},
       {keep_prob_label, keep_prob}
     };
 
-    // Perform inference
+    // Perform the inference step
     std::vector<Tensor> inference_outputs;
     Status inference_status = inference_session->Run(
                                           inference_inputs, {output_layer_label},
@@ -392,14 +315,18 @@ int main(int argc, char* argv[]) {
       return -1;
     }
 
+    // Extract the steering angle from the inference outputs
     output = inference_outputs[0].scalar<float>()(0);
 
+    // Time the inference
     clock_gettime(CLOCK_MONOTONIC, &t);
 
+    // Write a log entry
     runlog << image_index << "," << timediff(t,t0) << "," << timediff(t,t_prev)
           << "," << output << std::endl;
-    t_prev = t;
 
+    // Set t_prev to current time
+    t_prev = t;
 
   }
 
