@@ -110,7 +110,12 @@ Running the inferences using Python and C++ will create run log files under the 
 jupyter notebook autopilot.ipynb
 ```
 
-You can also create the plots in the notebook by running the `analyze.py` script.
+To view the precomputed Jupyter notebook, open the autopilot.html file with your
+browser.
+
+You can also create the plots shown in the notebook by running the `analyze.py`
+script without Jupyter. This is handy when you want to make changes to the
+inference implementation and view the outcome of your changes.
 
 ```bash
 python analyze.py
