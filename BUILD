@@ -1,5 +1,5 @@
 # Description:
-#   TensorFlow C++ inference example for labeling images.
+#   TensorFlow C++ inference example for self driving cars
 
 package(default_visibility = ["//tensorflow:internal"])
 
@@ -10,7 +10,7 @@ exports_files(["LICENSE"])
 cc_binary(
     name = "autopilot",
     srcs = [
-        "run_dataset.cc",
+        "run.cc",
     ],
     linkopts = ["-lm"],
     deps = [
@@ -29,6 +29,8 @@ filegroup(
             "**/OWNERS",
             "bin/**",
             "gen/**",
+            "**/*.ipynb",
+            "**/*.ipynb_checkpoints"
         ],
     ),
     visibility = ["//tensorflow:__subpackages__"],

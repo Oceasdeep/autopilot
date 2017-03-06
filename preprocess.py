@@ -3,7 +3,7 @@ import scipy.misc
 import shutil
 
 
-INPUTDIR = './driving_dataset/full'
+INPUTDIR = './driving_dataset'
 OUTPUTDIR = './driving_dataset/scaled'
 
 shutil.rmtree(OUTPUTDIR, ignore_errors=True)

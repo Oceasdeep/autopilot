@@ -28,9 +28,12 @@ sess = tf.InteractiveSession()
 # Build a steering model graph
 model = sm.Model()
 
+# Create log folders
+if not os.path.exists(MODELDIR):
+    os.makedirs(MODELDIR)
+
 # Save model to a protobuf file
 tf.train.write_graph(sess.graph_def, MODELDIR, 'graph.pb')
-
 
 #
 # Loss function
@@ -73,10 +76,6 @@ saver = tf.train.Saver()
 
 # Op to write logs to Tensorboard
 summary_writer = tf.summary.FileWriter(LOGDIR, graph=tf.get_default_graph())
-
-# Create log folders
-if not os.path.exists(MODELDIR):
-    os.makedirs(MODELDIR)
 
 if not os.path.exists(LOGDIR):
     os.makedirs(LOGDIR)
