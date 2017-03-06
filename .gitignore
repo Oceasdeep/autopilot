@@ -2,3 +2,5 @@
 driving_dataset/*
 logs/*
 save/*
+
+\.ipynb_checkpoints/
