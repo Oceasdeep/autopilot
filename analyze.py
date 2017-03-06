@@ -21,23 +21,41 @@ deg_cc = df_cc['Output']
 # Figure 1 - Time histograms
 bins = np.linspace(0.0,0.008,100)
 plt.figure(1)
-plt.title('Inference timing distribution')
+plt.title('Inference duration distribution')
 plt.subplot(211)
 dt_py.hist(bins=bins)
 plt.title('Python')
 plt.subplot(212)
 dt_cc.hist(bins=bins)
 plt.title('C++')
-plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95, hspace=0.35,
+plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95, hspace=0.55,
                     wspace=0.35)
 
 
 plt.figure(2)
-plt.title('Inference output')
+plt.title('Inference duration over time')
 plt.subplot(211)
 dt_py.plot()
+plt.title('Python')
 plt.subplot(212)
 dt_cc.plot()
+plt.title('C++')
+plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95, hspace=0.55,
+                    wspace=0.35)
+
+
+plt.figure(3)
+plt.title('Steering action over time')
+plt.subplot(211)
+deg_py.plot()
+plt.title('Python')
+plt.subplot(212)
+deg_cc.plot()
+plt.title('C++')
+plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95, hspace=0.55,
+                    wspace=0.35)
+
+
 
 # Plot time difference as a histogram
 plt.show()
