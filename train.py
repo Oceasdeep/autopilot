@@ -1,3 +1,8 @@
+"""Training of the NVIDIA end-to-end deep learning model for self-driving cars.
+
+This script is used to train the NVIDIA end-to-end deep learning model
+using images collected from a dashcam.
+"""
 import os
 import tensorflow as tf
 import driving_data

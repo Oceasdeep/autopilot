@@ -1,3 +1,8 @@
+"""ResultLogger class writes run log entries to a CSV file during inference
+
+This file defines a Python class that writes run log entries to a CSV file
+for each inference step.
+"""
 class ResultLogger(object):
     """Class for handling result logging to CSV files"""
 

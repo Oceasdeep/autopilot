@@ -1,9 +1,27 @@
+"""NVIDIA end-to-end deep learning model for self-driving cars.
+
+This file defines a Python class that encapsulates the self driving car
+convolutional neural network model. The inputs for the model are color images
+of width 200 and height 66. The outputs are steering wheel angles as
+a fraction of full 360 degree turn. The labels are recorded steering wheel
+angles in the same full-turn units.
+"""
 import tensorflow as tf
 import scipy
 
+# Convolutional neural network model for self driving cars
 class Model(object):
+    """NVIDIA end-to-end deep learning model for self-driving cars"""
 
     def __init__(self):
+        """Creates a deep learning model for self driving cars.
+
+        Attributes:
+            x (tf.placeholder): Placeholder for input image batch
+            y_ (tf.placeholder): Placeholder for training lables
+            keep_prob (tf.placeholder): Placeholder for dropout keep propability
+            y (tf.Tensor): Output tensor holding the steering angle
+        """
 
         #
         # Define placeholders

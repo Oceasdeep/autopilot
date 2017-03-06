@@ -1,16 +1,22 @@
+"""Loader for training and validation samples
+
+This file provides functions to load training and validation data from disk.
+"""
 import scipy.misc
 import random
 
+# Folder locations
 DATASETDIR = './driving_dataset/scaled'
 
+# Initialize dataset lists
 xs = []
 ys = []
 
-#points to the end of the last batch
+# Points to the end of the last batch
 train_batch_pointer = 0
 val_batch_pointer = 0
 
-#read data.txt
+# Read data.txt
 with open(DATASETDIR + "/data.txt") as f:
     for line in f:
         xs.append(DATASETDIR + "/" + line.split()[0])
