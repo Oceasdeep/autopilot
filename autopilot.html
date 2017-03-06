@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8" />
-<title>Deep Drive Inference</title><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.1.10/require.min.js"></script>
+<title>autopilot</title><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.1.10/require.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/2.0.3/jquery.min.js"></script>
 
 <style type="text/css">
@@ -11778,7 +11778,7 @@ div#notebook {
 </div>
 <div class="inner_cell">
 <div class="text_cell_render border-box-sizing rendered_html">
-<h1 id="Deep-Drive">Deep Drive<a class="anchor-link" href="#Deep-Drive">&#182;</a></h1><h2 id="Analysis-of-Timing-Statistics-of-Python-and-C++-Inference">Analysis of Timing Statistics of Python and C++ Inference<a class="anchor-link" href="#Analysis-of-Timing-Statistics-of-Python-and-C++-Inference">&#182;</a></h2>
+<h1 id="End-to-End-Deep-Learning-for-Self-Driving-Cars">End-to-End Deep Learning for Self-Driving Cars<a class="anchor-link" href="#End-to-End-Deep-Learning-for-Self-Driving-Cars">&#182;</a></h1><h2 id="Analysis-of-Execution-Time-Statistics-of-Python-and-C++-Inferences">Analysis of Execution Time Statistics of Python and C++ Inferences<a class="anchor-link" href="#Analysis-of-Execution-Time-Statistics-of-Python-and-C++-Inferences">&#182;</a></h2>
 </div>
 </div>
 </div>
@@ -11788,7 +11788,7 @@ div#notebook {
 <div class="inner_cell">
 <div class="text_cell_render border-box-sizing rendered_html">
 <h2 id="Background">Background<a class="anchor-link" href="#Background">&#182;</a></h2><p>Self driving cars need to make steering and other control decisions at deterministic pace to be able to safely control the behavior of the vehicle in traffic. A car traveling 70 mph moves one feet every 10 ms. One feet can be the difference between successful corrective action and a fatal accident. In this project we analyze the inference execution time determinism to compare Python and C++ based inference for self driving cars. We expect some fluctuations and fluctuations of the order of 10 ms are probably acceptable but 50 ms fluctuations probably would be too much for such a critical control system.</p>
-<p>In this project we have created a TensorFlow implementation of the <a href="https://devblogs.nvidia.com/parallelforall/deep-learning-self-driving-cars/">NVIDIA Deep Drive</a> self driving car model. Our implementation is based on the Python TensorFlow implementation by <a href="https://github.com/SullyChen/Autopilot-TensorFlow">Sully Chen</a>.</p>
+<p>In this project we have created a TensorFlow implementation of the <a href="https://devblogs.nvidia.com/parallelforall/deep-learning-self-driving-cars/">NVIDIA End-to-End Deep Learning for Self-Driving Cars</a> self driving car model. Our implementation is based on the Python TensorFlow implementation by <a href="https://github.com/SullyChen/Autopilot-TensorFlow">Sully Chen</a>.</p>
 <p>The project consists of a python based training script and both python and C++ based inference implementations. At the end of the training the training script saves a graph definition where all weights are replaced with corresponding constant values. This saved graph is then loaded by both Python and C++ inference implementations.</p>
 <p>In this notebook, we analyze compare the time it takes to perform inference steps for the model using both Python and C++ based inference implementations. Both implementations execute the same TensorFlow graph but it is expected that the Python code is somewhat slower and also may get impacted by the garbage collection occasionally slowing  down the inference for short periods of time.</p>
 <p>We start by loading the results datasets for inference timing from both Python and C++ code.</p>
@@ -12044,7 +12044,7 @@ div#notebook {
 </div>
 <div class="inner_cell">
 <div class="text_cell_render border-box-sizing rendered_html">
-<p>The mean exectution time for the inference steps in the Time_Diff column is for the Python implementation 1.9 ms and for C++ implementation 1.7 ms. These numbers are very similar. However the maximum exection time for Python was 30 ms and for C++ the same was 11 ms, nearly 1/3 of that of Python inference.</p>
+<p>The mean exectution time for the inference steps in the Time_Diff column is for the Python implementation 1.9 ms and for C++ implementation 1.7 ms. These numbers are very similar. However the maximum exection time for Python was 30 ms and for C++ the same was 11 ms, nearly 1/3 of that of Python inference. However if we look at the 75% percentiles of Python and C++ execution times, they look very similar. Single instances of slower execution time with Python altough important does not provide enough statistical value for us to evaluate the significance.</p>
 
 </div>
 </div>
@@ -13605,9 +13605,9 @@ DOMorFgYhmEYR2HFwjAMwzgKKxaGYRjGUf4fnv+d9l2iK5QAAAAASUVORK5CYII=
 </div>
 <div class="inner_cell">
 <div class="text_cell_render border-box-sizing rendered_html">
-<h2 id="Conclusions">Conclusions<a class="anchor-link" href="#Conclusions">&#182;</a></h2><p>We naturally cannot make wide ranging recommensations only based on ~40k images fed through a very basic TensorFlow based self driving car steering model but the results are in alignment with our initialy hypothesis. The C++ model has consistently lower latency than the corresponding Python model. Furthermore and more importantly the worst performance of the C++ model is one thirf of the worst performance of the Python model. Based on this analysis alone, implementing hobby projects with Python is probably feasible but for any real-world application a more deterministic non garbage collected language is recommended.</p>
+<h2 id="Conclusions">Conclusions<a class="anchor-link" href="#Conclusions">&#182;</a></h2><p>We naturally cannot make wide ranging recommensations only based on ~40k images fed through a very basic TensorFlow based self driving car steering model but the results are in alignment with our initialy hypothesis. The C++ model has consistently slightly lower latency than the corresponding Python model. Furthermore and more importantly the worst performance of the C++ model is one third of the worst performance of the Python model. However we don't have enough statistics to evaluate the real-world implications. We would need to run through much more data to make any statistically significant conclusions.</p>
 <p>In this project we used standard Linux 4.8 kernel and a NVIDIA GTX 1060 GPU. To improve the timing determinism even further a hard real-time or soft real-time operating system could be used. Linux has a low latency kernel that provides soft real-time capabilities. This would allow reducing the maximum latency of high priority tasks at the expense of lower priority tasks. Furthermore there is also a Preempt RT kernel patch for Linux kernel that provides hard real-time guarantees. Hard real-time does not reduce latency over soft real-time. However it provides guarantees that the inference would be executed at a specific frequency and guaranteed specific CPU resources. But these guarantees are only valuable if everything in the critical time loop are implemented in a specific way.</p>
-<p>Based on these results C++ implementation has latency fluctuations of around 10 ms. This seems to be acceptable level of uncertainty for real-world self driving cars and hence hard real-time is definitely recommended but may not be absolutely required.</p>
+<p>Based on these results C++ implementation has latency fluctuations of around 10 ms. This seems to be acceptable level of uncertainty for real-world self driving cars as long as inference is only used to make vehicle control decisions. However we don't have enough statistics to evaluate if the C++ model will actually stay below ~10 ms consistently or if we were just lucky. Hard real-time environment is definitely recommended for mission critical control systems like self driving cars.</p>
 
 </div>
 </div>
