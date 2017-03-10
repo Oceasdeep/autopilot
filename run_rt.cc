@@ -318,7 +318,7 @@ int main(int argc, char* argv[]) {
   const int one_past_last_image = 45567;
 
   // Real-Time properties
-  int priority = 40;
+  int priority = 40; // Must be be
   int scheduler = SCHED_FIFO;
   int clk = CLOCK_MONOTONIC_RAW;
   size_t heap_preallocation_size = 8589934592; // 8 GB
@@ -392,6 +392,9 @@ int main(int argc, char* argv[]) {
   // Initialize star time
   timespec t0 = t;
 
+  // Initialize image index
+  long image_index = -1;
+  
   // Initialize output variable
   float output = 0.0;
 
@@ -413,7 +416,29 @@ int main(int argc, char* argv[]) {
   show_new_pagefault_count("Before inference", ">=0", ">=0");
 
   // Inference loop, loop through defined number of images
-  for(long image_index=0; image_index < one_past_last_image; image_index++){
+  while(true){
+
+    // Increment image index
+    image_index++;
+
+    // Get the image from disk as a float array of numbers, resized and
+    // normalized to the specifications the graph input placeholder expects.
+    std::vector<Tensor> resized_tensors;
+    std::stringstream ss;
+    ss << image_index << ".jpg";
+    string image_file_name = ss.str();
+    string image_path = tensorflow::io::JoinPath(root_dir, data_dir,
+                                                 image_file_name);
+    Status read_tensor_status =
+       ReadTensorFromImageFile(image_path, input_height, input_width, input_mean,
+                               input_std, &resized_tensors);
+    if (!read_tensor_status.ok()) {
+      // Last image, exit loop
+      break;
+    }
+
+    // Extract the image from the returned tensor vector
+    const Tensor& image_tensor = resized_tensors[0];
 
     // Prepare inputs to be fed for the inference step
     std::vector<std::pair<string, tensorflow::Tensor>> inference_inputs = {

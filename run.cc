@@ -222,6 +222,9 @@ int main(int argc, char* argv[]) {
   const float input_mean = 0.0;
   const float input_std = 255.0;
 
+  // Timing properties
+  int clk = CLOCK_MONOTONIC_RAW;
+
   // Load the frozen graph we are going to use for inference from file
   string graph_path = tensorflow::io::JoinPath(root_dir, graph_dir, graph_file);
   tensorflow::GraphDef inference_def;
@@ -254,7 +257,7 @@ int main(int argc, char* argv[]) {
   // Initialize timers used for timing the inference
   // t is the current time
   timespec t;
-  clock_gettime(CLOCK_MONOTONIC, &t);
+  clock_gettime(clk, &t);
 
   // t0 is the start time of the inference
   timespec t0;
@@ -274,7 +277,7 @@ int main(int argc, char* argv[]) {
   runlog << image_index << "," << timediff(t,t0) << "," << timediff(t,t_prev)
         << "," << output << std::endl;
 
-  // Inference loop
+  // Inference loop, loop through defined number of images
   while(true){
 
     // Increment image index
@@ -292,8 +295,8 @@ int main(int argc, char* argv[]) {
        ReadTensorFromImageFile(image_path, input_height, input_width, input_mean,
                                input_std, &resized_tensors);
     if (!read_tensor_status.ok()) {
-      LOG(ERROR) << read_tensor_status;
-      return -1;
+      // Last image, exit loop
+      break;
     }
 
     // Extract the image from the returned tensor vector
@@ -319,7 +322,7 @@ int main(int argc, char* argv[]) {
     output = inference_outputs[0].scalar<float>()(0);
 
     // Time the inference
-    clock_gettime(CLOCK_MONOTONIC, &t);
+    clock_gettime(clk, &t);
 
     // Write a log entry
     runlog << image_index << "," << timediff(t,t0) << "," << timediff(t,t_prev)
