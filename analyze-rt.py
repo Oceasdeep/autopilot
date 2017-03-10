@@ -9,7 +9,7 @@ import pandas as pd
 
 # Import run log from CSV file
 #df_py = pd.DataFrame.from_csv('results/run.py.csv')
-df_cc = pd.DataFrame.from_csv('results/run.cc.csv')
+df_cc = pd.DataFrame.from_csv('results/run.rt.csv')
 
 # Remove two first rows to remove initialization effects
 #df_py = df_py.loc[df_py.index > 0]

@@ -1,5 +1,4 @@
 #define _USE_MATH_DEFINES
-#define MY_STACK_SIZE       (100*1024*1024)
 
 #include <ostream>
 #include <fstream>
@@ -50,6 +49,7 @@ using tensorflow::DT_FLOAT;
 using tensorflow::DT_STRING;
 
 
+// Compute the time difference in nanosecods between two time events
 int64_t timediff_nanoseconds(timespec end, timespec start)
 {
   const int64_t second = 1000000000;
@@ -64,19 +64,6 @@ int64_t timediff_nanoseconds(timespec end, timespec start)
          + static_cast<int64_t>(temp.tv_nsec);
 }
 
-timespec timeadd(timespec t1, timespec t2)
-{
-  const long second = 1000000000L;
-  timespec temp;
-  temp.tv_sec = t1.tv_sec+t2.tv_sec;
-  temp.tv_nsec = t1.tv_nsec+t2.tv_nsec;
-  if (temp.tv_nsec >= second) {
-    temp.tv_nsec -= second;
-    temp.tv_sec += 1;
-  }
-  return temp;
-}
-
 
 // Computes the time difference in seconds between two time events
 double timediff(timespec end, timespec start)
@@ -87,6 +74,7 @@ double timediff(timespec end, timespec start)
 }
 
 
+// Set process (real-time) priority and scheduler
 static void setprio(int prio, int sched)
 {
  struct sched_param param;
@@ -97,6 +85,7 @@ static void setprio(int prio, int sched)
 }
 
 
+// Display memory pagefault count
 void show_new_pagefault_count(const char* logtext,
            const char* allowed_maj,
            const char* allowed_min)
@@ -115,70 +104,7 @@ void show_new_pagefault_count(const char* logtext,
  last_minflt = usage.ru_minflt;
 }
 
-static void prove_thread_stack_use_is_safe(int stacksize)
-{
- volatile char buffer[stacksize];
- int i;
-
- /* Prove that this thread is behaving well */
- for (i = 0; i < stacksize; i += sysconf(_SC_PAGESIZE)) {
-   /* Each write to this buffer shall NOT generate a
-     pagefault. */
-   buffer[i] = i;
- }
-
- show_new_pagefault_count("Caused by using thread stack", "0", "0");
-}
-
-/*************************************************************/
-/* The thread to start */
-static void *my_rt_thread(void *args)
-{
- struct timespec ts;
- ts.tv_sec = 30;
- ts.tv_nsec = 0;
-
- setprio(sched_get_priority_max(SCHED_RR), SCHED_RR);
-
- printf("I am an RT-thread with a stack that does not generate " \
-        "page-faults during use, stacksize=%i\n", MY_STACK_SIZE);
-
-//<do your RT-thing here>
-
- show_new_pagefault_count("Caused by creating thread", ">=0", ">=0");
-
- prove_thread_stack_use_is_safe(MY_STACK_SIZE);
-
- /* wait 30 seconds before thread terminates */
- clock_nanosleep(CLOCK_REALTIME, 0, &ts, NULL);
-
- return NULL;
-}
-
-/*************************************************************/
-
-static void error(int at)
-{
- /* Just exit on error */
- fprintf(stderr, "Some error occured at %d", at);
- exit(1);
-}
-
-static void start_rt_thread(void)
-{
- pthread_t thread;
- pthread_attr_t attr;
-
- /* init to default values */
- if (pthread_attr_init(&attr))
-   error(1);
- /* Set the requested stacksize for this thread */
- if (pthread_attr_setstacksize(&attr, PTHREAD_STACK_MIN + MY_STACK_SIZE))
-   error(2);
- /* And finally start the actual thread */
- pthread_create(&thread, &attr, my_rt_thread, NULL);
-}
-
+// Prepare memory allocations for real-time usage
 static void configure_malloc_behavior(void)
 {
  /* Now lock all current and future pages
@@ -193,6 +119,8 @@ static void configure_malloc_behavior(void)
  mallopt(M_MMAP_MAX, 0);
 }
 
+
+// Allocate memory and touch it to force it to RAM
 static void reserve_process_memory(int size)
 {
  int i;
@@ -367,13 +295,11 @@ int main(int argc, char* argv[]) {
   using namespace tensorflow;
   using namespace tensorflow::ops;
 
-
-
   // Initialize path variables
   string log_dir = "results";
   string graph_dir = "save";
   string graph_file = "frozen_graph.pb";
-  string log_file = "run.cc.csv";
+  string log_file = "run.rt.csv";
   string data_dir = tensorflow::io::JoinPath("driving_dataset","scaled");
   string root_dir = "";
 
@@ -392,23 +318,21 @@ int main(int argc, char* argv[]) {
   const int one_past_last_image = 45567;
 
   // Real-Time properties
-  int priority = 40; // 99
-  int scheduler = SCHED_FIFO; //SCHED_RR; // SCHED_FIFO
+  int priority = 40;
+  int scheduler = SCHED_FIFO;
   int clk = CLOCK_MONOTONIC_RAW;
   size_t heap_preallocation_size = 8589934592; // 8 GB
-  double interval_in_seconds = 0.005;
 
-
-  // Page faults
+  // Show page faults
  	show_new_pagefault_count("Initial count", ">=0", ">=0");
 
   // Configure memory allocator behavior
   configure_malloc_behavior();
 
-  // Page faults
+  // Show page faults
   show_new_pagefault_count("mlockall() generated", ">=0", ">=0");
 
-  // Reserve heap
+  // Reserve and activate heap
   reserve_process_memory(heap_preallocation_size);
 
   // Set process priority
@@ -455,42 +379,29 @@ int main(int argc, char* argv[]) {
   Tensor keep_prob(DT_FLOAT, tensorflow::TensorShape());
   keep_prob.scalar<float>()() = 1.0;
 
-  // Create runlog stream
+  // Create runlog stream that we use for logging during inference
   std::ostringstream runlog;
 
+  // Write header to the runlog stream
   runlog << "Index,Time,Time_Diff,Output" << std::endl;
 
-  // Initialize timers used for timing the inference
-  // t is the current time
+  // Initialize current time
   timespec t;
   clock_gettime(clk, &t);
 
-  // t0 is the start time of the inference
-  timespec t0;
-  t0 = t;
+  // Initialize star time
+  timespec t0 = t;
 
-  // t_prev is the time at previous iteration
-
-  // Initialize image index
-  // long image_index = -1;
-
-  // initialize output variable
+  // Initialize output variable
   float output = 0.0;
 
-  // time parameters
+  // Initialize time for previous iteration
   timespec t_prev;
   t_prev = t;
+
+  // Time variables in seconds for logging
   double dt;
   double dt0;
-  timespec time_interval;
-
-  double fractpart, intpart;
-  fractpart = modf(interval_in_seconds, &intpart);
-  time_interval.tv_nsec = static_cast<long>(fractpart * 1e9);
-  time_interval.tv_sec = static_cast<time_t>(intpart);
-
-  LOG(INFO) << "Time interval set to "
-            << time_interval.tv_nsec / 1000000L << " ms";
 
   // Write initial entry to runlog
   dt0 = timediff(t,t0);
@@ -498,22 +409,11 @@ int main(int argc, char* argv[]) {
   runlog << -1 << "," << dt0 << "," << dt
         << "," << output << std::endl;
 
-  // Inference loop
-  //timespec prev_multiple;
-  //clock_gettime(CLOCK_MONOTONIC, &prev_multiple);
+  // Show page faults
+  show_new_pagefault_count("Before inference", ">=0", ">=0");
 
-  show_new_pagefault_count("before inference", ">=0", ">=0");
+  // Inference loop, loop through defined number of images
   for(long image_index=0; image_index < one_past_last_image; image_index++){
-  //while(dt0<60) {
-
-    //timespec next_multiple = timeadd(prev_multiple,time_interval);
-    //int nanosleep_status = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
-    //                                       &next_multiple, NULL);
-    //if (!nanosleep_status == 0) {
-    //  LOG(ERROR) << "Nanosleep failed with error code " << nanosleep_status;
-    //  return -1;
-    //}
-    //prev_multiple = next_multiple;
 
     // Prepare inputs to be fed for the inference step
     std::vector<std::pair<string, tensorflow::Tensor>> inference_inputs = {
@@ -535,26 +435,23 @@ int main(int argc, char* argv[]) {
     output = inference_outputs[0].scalar<float>()(0);
 
 
-    // Time the inference
+    // Time the inference duration
     clock_gettime(clk, &t);
-    // Write a log entry
     dt0 = timediff(t,t0);
     dt = timediff(t,t_prev);
 
-
+    // Write log entry
     runlog << image_index << "," << dt0 << "," << dt
           << "," << output << std::endl;
 
-    //if (dt > 0.5) {
-    //  LOG(ERROR) << "t2=" << t.tv_sec << "." << t.tv_nsec << " t1="
-    //      << t_prev.tv_sec << "." << t_prev.tv_nsec;
-    //}
     // Set t_prev to current time
     t_prev = t;
 
   }
 
+  // Show page faults
   show_new_pagefault_count("final count", ">=0", ">=0");
+
   // Open runlog file and add a header line
   string runlog_path = tensorflow::io::JoinPath(root_dir, log_dir,
                                                 log_file);
