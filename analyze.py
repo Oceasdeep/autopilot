@@ -10,53 +10,64 @@ import pandas as pd
 # Import run log from CSV file
 df_py = pd.DataFrame.from_csv('results/run.py.csv')
 df_cc = pd.DataFrame.from_csv('results/run.cc.csv')
+df_rt = pd.DataFrame.from_csv('results/run.rt.csv')
 
 # Remove two first rows to remove initialization effects
 df_py = df_py.loc[df_py.index > 0]
 df_cc = df_cc.loc[df_cc.index > 0]
-
+df_rt = df_rt.loc[df_rt.index > 0]
 
 # Select time difference column
 dt_py = df_py['Time_Diff']
 dt_cc = df_cc['Time_Diff']
+dt_rt = df_rt['Time_Diff']
 
 deg_py = df_py['Output']
 deg_cc = df_cc['Output']
+deg_rt = df_rt['Output']
 
 # Plot histograms of inference execution durations
 bins = np.linspace(0.0,0.008,100)
 plt.figure(1)
-plt.title('Inference duration distribution')
-plt.subplot(211)
+plt.subplot(311)
 dt_py.hist(bins=bins)
 plt.title('Python')
-plt.subplot(212)
+plt.subplot(312)
 dt_cc.hist(bins=bins)
 plt.title('C++')
+plt.subplot(313)
+dt_rt.hist(bins=bins)
+plt.title('C++ RT')
 plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95, hspace=0.55,
                     wspace=0.35)
 
 
 # Plot inference execution durations over time
 plt.figure(2)
-plt.subplot(211)
+plt.subplot(311)
 dt_py.plot()
 plt.title('Python')
-plt.subplot(212)
+plt.subplot(312)
 dt_cc.plot()
 plt.title('C++')
+plt.subplot(313)
+dt_rt.plot()
+plt.title('C++ RT')
 plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95, hspace=0.55,
                     wspace=0.35)
 
 
 # Plot steering angle over time
 plt.figure(3)
-plt.subplot(211)
+plt.subplot(311)
 deg_py.plot()
 plt.title('Python')
-plt.subplot(212)
+plt.subplot(312)
 deg_cc.plot()
 plt.title('C++')
+plt.subplot(313)
+deg_rt.plot()
+plt.title('C++ RT')
 plt.subplots_adjust(top=0.92, bottom=0.08, left=0.10, right=0.95, hspace=0.55,
                     wspace=0.35)
 

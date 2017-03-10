@@ -5,7 +5,18 @@
 #include <sstream>
 #include <vector>
 #include <cmath>
+
+#include <sched.h>
 #include <time.h>
+#include <unistd.h>
+#include <malloc.h>
+#include <pthread.h>
+#include <limits.h>
+#include <sys/resource.h>
+#include <sys/time.h>
+#include <sys/mman.h>
+#include <sys/prctl.h>
+
 #include <jpeglib.h>
 #include <setjmp.h>
 
@@ -38,21 +49,104 @@ using tensorflow::DT_FLOAT;
 using tensorflow::DT_STRING;
 
 
+// Compute the time difference in nanosecods between two time events
+int64_t timediff_nanoseconds(timespec end, timespec start)
+{
+  const int64_t second = 1000000000;
+  timespec temp;
+  temp.tv_sec = end.tv_sec-start.tv_sec;
+  temp.tv_nsec = end.tv_nsec-start.tv_nsec;
+  if (temp.tv_nsec < 0) {
+    temp.tv_nsec += second;
+    temp.tv_sec -= 1;
+  }
+	return static_cast<int64_t>(temp.tv_sec)*second
+         + static_cast<int64_t>(temp.tv_nsec);
+}
+
+
 // Computes the time difference in seconds between two time events
 double timediff(timespec end, timespec start)
 {
-	timespec temp;
-	if ((end.tv_nsec-start.tv_nsec)<0) {
-		temp.tv_sec = end.tv_sec-start.tv_sec-1;
-		temp.tv_nsec = 1000000000+end.tv_nsec-start.tv_nsec;
-	} else {
-		temp.tv_sec = end.tv_sec-start.tv_sec;
-		temp.tv_nsec = end.tv_nsec-start.tv_nsec;
-	}
-  double seconds = static_cast<double>(temp.tv_sec)
-                   + static_cast<double>(temp.tv_nsec)/1e9;
-	return seconds;
+  const double second = 1000000000;
+  int64_t diff =  timediff_nanoseconds(end, start);
+  return static_cast<double>(diff) / second;
 }
+
+
+// Set process (real-time) priority and scheduler
+static void setprio(int prio, int sched)
+{
+ struct sched_param param;
+ // Set realtime priority for this thread
+ param.sched_priority = prio;
+ if (sched_setscheduler(0, sched, &param) < 0)
+   perror("sched_setscheduler");
+}
+
+
+// Display memory pagefault count
+void show_new_pagefault_count(const char* logtext,
+           const char* allowed_maj,
+           const char* allowed_min)
+{
+ static int last_majflt = 0, last_minflt = 0;
+ struct rusage usage;
+
+ getrusage(RUSAGE_SELF, &usage);
+
+ printf("%-30.30s: Pagefaults, Major:%ld (Allowed %s), " \
+        "Minor:%ld (Allowed %s)\n", logtext,
+        usage.ru_majflt - last_majflt, allowed_maj,
+        usage.ru_minflt - last_minflt, allowed_min);
+
+ last_majflt = usage.ru_majflt;
+ last_minflt = usage.ru_minflt;
+}
+
+// Prepare memory allocations for real-time usage
+static void configure_malloc_behavior(void)
+{
+ /* Now lock all current and future pages
+    from preventing of being paged */
+ if (mlockall(MCL_CURRENT | MCL_FUTURE))
+   perror("mlockall failed:");
+
+ /* Turn off malloc trimming.*/
+ mallopt(M_TRIM_THRESHOLD, -1);
+
+ /* Turn off mmap usage. */
+ mallopt(M_MMAP_MAX, 0);
+}
+
+
+// Allocate memory and touch it to force it to RAM
+static void reserve_process_memory(int size)
+{
+ int i;
+ char *buffer;
+
+ buffer = (char*) malloc(size);
+
+ /* Touch each page in this piece of memory to get it mapped into RAM */
+ for (i = 0; i < size; i += sysconf(_SC_PAGESIZE)) {
+   /* Each write to this buffer will generate a pagefault.
+      Once the pagefault is handled a page will be locked in
+      memory and never given back to the system. */
+   buffer[i] = 0;
+ }
+
+ /* buffer will now be released. As Glibc is configured such that it
+    never gives back memory to the kernel, the memory allocated above is
+    locked for this process. All malloc() and new() calls come from
+    the memory pool reserved and locked above. Issuing free() and
+    delete() does NOT make this locking undone. So, with this locking
+    mechanism we can build C++ applications that will never run into
+    a major/minor pagefault, even with swapping enabled. */
+ free(buffer);
+}
+
+
 
 // Error handling for JPEG decoding.
 void CatchError(j_common_ptr cinfo) {
@@ -205,7 +299,7 @@ int main(int argc, char* argv[]) {
   string log_dir = "results";
   string graph_dir = "save";
   string graph_file = "frozen_graph.pb";
-  string log_file = "run.cc.csv";
+  string log_file = "run.rt.csv";
   string data_dir = tensorflow::io::JoinPath("driving_dataset","scaled");
   string root_dir = "";
 
@@ -221,9 +315,28 @@ int main(int argc, char* argv[]) {
   const int input_width = 200;
   const float input_mean = 0.0;
   const float input_std = 255.0;
+  const int one_past_last_image = 45567;
 
-  // Timing properties
+  // Real-Time properties
+  int priority = 40; // Must be be
+  int scheduler = SCHED_FIFO;
   int clk = CLOCK_MONOTONIC_RAW;
+  size_t heap_preallocation_size = 8589934592; // 8 GB
+
+  // Show page faults
+ 	show_new_pagefault_count("Initial count", ">=0", ">=0");
+
+  // Configure memory allocator behavior
+  configure_malloc_behavior();
+
+  // Show page faults
+  show_new_pagefault_count("mlockall() generated", ">=0", ">=0");
+
+  // Reserve and activate heap
+  reserve_process_memory(heap_preallocation_size);
+
+  // Set process priority
+  setprio(priority, scheduler);
 
   // Load the frozen graph we are going to use for inference from file
   string graph_path = tensorflow::io::JoinPath(root_dir, graph_dir, graph_file);
@@ -243,39 +356,64 @@ int main(int argc, char* argv[]) {
     return -1;
   }
 
+  // Get the image from disk as a float array of numbers, resized and
+  // normalized to the specifications the graph input placeholder expects.
+  std::vector<Tensor> resized_tensors;
+  std::stringstream ss;
+  ss << 0 << ".jpg";
+  string image_file_name = ss.str();
+  string image_path = tensorflow::io::JoinPath(root_dir, data_dir,
+                                               image_file_name);
+  Status read_tensor_status =
+     ReadTensorFromImageFile(image_path, input_height, input_width, input_mean,
+                             input_std, &resized_tensors);
+  if (!read_tensor_status.ok()) {
+    LOG(ERROR) << "Failed to read image file.";
+    return -1;
+  }
+
+  // Extract the image from the returned tensor vector
+  const Tensor& image_tensor = resized_tensors[0];
+
   // Set dropout keep propability to 1.0 to turn off drouput during inference
   Tensor keep_prob(DT_FLOAT, tensorflow::TensorShape());
   keep_prob.scalar<float>()() = 1.0;
 
-  // Open runlog file and add a header line
-  string runlog_path = tensorflow::io::JoinPath(root_dir, log_dir,
-                                                log_file);
-  std::ofstream runlog;
-  runlog.open(runlog_path);
+  // Create runlog stream that we use for logging during inference
+  std::ostringstream runlog;
+
+  // Write header to the runlog stream
   runlog << "Index,Time,Time_Diff,Output" << std::endl;
 
-  // Initialize timers used for timing the inference
-  // t is the current time
+  // Initialize current time
   timespec t;
   clock_gettime(clk, &t);
 
-  // t0 is the start time of the inference
-  timespec t0;
-  t0 = t;
-
-  // t_prev is the time at previous iteration
-  timespec t_prev;
-  t_prev = t;
+  // Initialize star time
+  timespec t0 = t;
 
   // Initialize image index
   long image_index = -1;
-
-  // initialize output variable
+  
+  // Initialize output variable
   float output = 0.0;
 
+  // Initialize time for previous iteration
+  timespec t_prev;
+  t_prev = t;
+
+  // Time variables in seconds for logging
+  double dt;
+  double dt0;
+
   // Write initial entry to runlog
-  runlog << image_index << "," << timediff(t,t0) << "," << timediff(t,t_prev)
+  dt0 = timediff(t,t0);
+  dt = timediff(t,t_prev);
+  runlog << -1 << "," << dt0 << "," << dt
         << "," << output << std::endl;
+
+  // Show page faults
+  show_new_pagefault_count("Before inference", ">=0", ">=0");
 
   // Inference loop, loop through defined number of images
   while(true){
@@ -321,17 +459,31 @@ int main(int argc, char* argv[]) {
     // Extract the steering angle from the inference outputs
     output = inference_outputs[0].scalar<float>()(0);
 
-    // Time the inference
-    clock_gettime(clk, &t);
 
-    // Write a log entry
-    runlog << image_index << "," << timediff(t,t0) << "," << timediff(t,t_prev)
+    // Time the inference duration
+    clock_gettime(clk, &t);
+    dt0 = timediff(t,t0);
+    dt = timediff(t,t_prev);
+
+    // Write log entry
+    runlog << image_index << "," << dt0 << "," << dt
           << "," << output << std::endl;
 
     // Set t_prev to current time
     t_prev = t;
 
   }
+
+  // Show page faults
+  show_new_pagefault_count("final count", ">=0", ">=0");
+
+  // Open runlog file and add a header line
+  string runlog_path = tensorflow::io::JoinPath(root_dir, log_dir,
+                                                log_file);
+  std::ofstream runlog_file;
+  runlog_file.open(runlog_path);
+  runlog_file << runlog.str();
+  runlog_file.close();
 
   return 0;
 }

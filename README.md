@@ -2,13 +2,19 @@
 
 ## Overview
 
-Self driving cars need to make steering and other control decisions at deterministic pace to be able to safely control the behavior of the vehicle in traffic. A car traveling 70 mph moves one feet every 10 ms. One feet can be the difference between successful corrective action and a fatal accident. In this project we analyze the inference execution time determinism to compare Python and C++ based inference for self driving cars. We expect some fluctuations and fluctuations of the order of 10 ms are probably acceptable but 50 ms fluctuations probably would be too much for such a critical control system.  
+Deep learning based self driving cars need to make steering and other control decisions at deterministic pace to be able to safely control the behavior of the vehicle in traffic. A car traveling 70 mph moves one feet every 10 ms. One feet can be the difference between successful corrective action and a fatal accident. In this project we analyze the inference execution time determinism and jitter. We compare Python, C++ and real-time optimized C++ deep learning inference implementations for self driving cars using TensorFlow. We expect some jitter and jitter of the order of 5-10 ms is probably acceptable for a self driving car but 50 ms delays probably would be too much for such a critical control system.  
 
-In this project we have created a TensorFlow implementation of the [NVIDIA End-to-End Deep Learning for Self-Driving Cars](https://devblogs.nvidia.com/parallelforall/deep-learning-self-driving-cars/) self driving car model. Our implementation is based on the Python TensorFlow implementation by [Sully Chen](https://github.com/SullyChen/Autopilot-TensorFlow).
+In this project we have created a TensorFlow implementation of the [NVIDIA End-to-End Deep Learning for Self-Driving Cars](https://devblogs.nvidia.com/parallelforall/deep-learning-self-driving-cars/) self driving car model. Our implementation is based on the Python TensorFlow implementation by [Sully Chen](https://github.com/SullyChen/Autopilot-TensorFlow). 
 
-The project consists of a python based training script and both python and C++ based inference implementations. At the end of the training the training script saves a graph definition where all weights are replaced with corresponding constant values. This saved graph is then loaded by both Python and C++ inference implementations.
+The project consists of a python based training script and a python and two C++ based inference implementations. At the end of the training the training script saves a graph definition where all weights are replaced with corresponding constant values. This saved graph is then loaded by the Python and both C++ inference implementations. 
+
+As the execution environment we used Ubuntu 16.10 with a custom Linux 4.9.13 kernel with a Preempt RT real-time patch. This patch adds hard real-time support to the operating system. The inference was performed on a NVIDIA GTX 1060 GPU.  
 
 ## Setting Up
+
+### Install Preempt RT Kernel
+
+To be able to fully benefit from the real-time optimizations it is recommended to install the Preempt RT kernel patch on Linux. Building and installing the kernel patch is outside the scope of this readme. Everything should work on a regular linux as well but the timing statistics would be different.
 
 ### Checkout TensorFlow Sources
 
@@ -100,6 +106,14 @@ Use the executable we built above to run the inference on the dataset using C++.
 
 ```bash
 ../../bazel-bin/tensorflow/autopilot/autopilot
+```
+
+### Real-Time Optimized C++
+
+Use the executable we built above to run the inference on the dataset using real-time optimized C++.
+
+```bash
+sudo ../../bazel-bin/tensorflow/autopilot/autopilot-rt
 ```
 
 ## Analyzing the Results

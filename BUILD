@@ -20,6 +20,19 @@ cc_binary(
     ],
 )
 
+cc_binary(
+    name = "autopilot-rt",
+    srcs = [
+        "run_rt.cc",
+    ],
+    linkopts = ["-lm"],
+    deps = [
+        "//tensorflow/cc:cc_ops",
+        "//tensorflow/core:framework_internal",
+        "//tensorflow/core:tensorflow"
+    ],
+)
+
 filegroup(
     name = "all_files",
     srcs = glob(
